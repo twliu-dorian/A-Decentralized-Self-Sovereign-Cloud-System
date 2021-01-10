@@ -1,0 +1,35 @@
+<%- include('partials/header') %>
+<div class="box" id="geting">
+  <h1> <%= saymyname %>'s Mailbox</h1>
+</div>
+<div class="box">
+
+  <%  newListItems2.forEach(function(item2){ %>
+
+    <form action="/delete2" method="post">
+      <div class="item">
+        <input type="checkbox" name="checkbox" value="<%=item2._id%>" onChange="this.form.submit()">
+        <p><%=item2.name%></p>
+        <p class="bywhom"><%=item2.sender%></p>
+      </div>
+      <input type="hidden" name="listName" value=""></input>
+    </form>
+  <%  }) %>
+  <form class="item" action="/receivebox" method="post">
+    <input class="sendtotxt" type="text" name="sendTO" placeholder="Send To" autocomplete="off">
+    <input class="sendtotxt" type="text" name="sendMSG" placeholder="Send Msg" autocomplete="off">
+    <button class="chat_btn" type="submit" >></button>
+  </form>
+
+</div>
+<div style="text-align:center;"">
+  <br>
+  <br>
+    <a class="btn btn-light btn-lg" href="/faces" role="button">Age Estimator</a>
+    <a class="btn btn-light btn-lg" href="/notes" role="button">Back to notes</a>
+    <a class="btn btn-light btn-lg" href="/rekognition" role="button">Face Rekognition</a>
+  <%- include('partials/footer') %>
+</div>
+<script type="text/javascript">
+alert("This function requires your messages being written in provider's database!");
+</script>

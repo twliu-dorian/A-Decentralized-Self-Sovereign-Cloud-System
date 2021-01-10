@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <!-- **DO THIS**: -->
+    <!--   Replace SDK_VERSION_NUMBER with the current SDK version number -->
+    <script src="https://sdk.amazonaws.com/js/aws-sdk-2.16.0.min.js"></script>
+    <!-- <script src="./app.js"></script> -->
+    <!-- <script src="../rekognitiom.js"></script> -->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css"
+        integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
+    <script>
+        var albumBucketName = "api-bridge-rekognition";
+        var bucketRegion = "us-east-1";
+        var IdentityPoolId = "us-east-1:647f0715-57a0-4b90-a4c0-2edeb4aaeed1";
+
+        AWS.config.update({
+            region: bucketRegion,
+            credentials: new AWS.CognitoIdentityCredentials({
+                IdentityPoolId: IdentityPoolId
+            })
+        });
+
+        var s3 = new AWS.S3({
+            apiVersion: "2006-03-01",
+            params: { Bucket: albumBucketName }
+        });
+
+        function listAlbums() {
+            s3.listObjects({ Delimiter: "/" }, function (err, data) {
+                if (err) {
+                    return alert("There was an error listing your albums: " + err.message);
+                } else {
+                    var albums = data.CommonPrefixes.map(function (commonPrefix) {
+                        var prefix = commonPrefix.Prefix;
+                        var albumName = decodeURIComponent(prefix.replace("/", ""));
+                        return getHtml([
+                            "<li>",
+                            "<span onclick=\"deleteAlbum('" + albumName + "')\">X</span>",
+                            "<span onclick=\"viewAlbum('" + albumName + "')\">",
+                            albumName,
+                            "</span>",
+                            "</li>"
+                        ]);
+                    });
+                    var message = albums.length
+                        ? getHtml([
+                            "<p>Click on an album name to view it.</p>",
+                            "<p>Click on the X to delete the album.</p>"
+                        ])
+                        : "<p>You do not have any albums. Please Create album.";
+                    var htmlTemplate = [
+                        "<h2>Albums</h2>",
+                        message,
+                        "<ul>",
+                        getHtml(albums),
+                        "</ul>",
+                        "<a class=\"btn btn-light\"  onclick=\"createAlbum(prompt('Enter Album Name:'))\">",
+                        "Create New Album",
+                        "</a>"
+                    ];
+                    document.getElementById("app").innerHTML = getHtml(htmlTemplate);
+                }
+            });
+        }
+
+        function createAlbum(albumName) {
+            albumName = albumName.trim();
+            if (!albumName) {
+                return alert("Album names must contain at least one non-space character.");
+            }
+            if (albumName.indexOf("/") !== -1) {
+                return alert("Album names cannot contain slashes.");
+            }
+            var albumKey = encodeURIComponent(albumName);
+            s3.headObject({ Key: albumKey }, function (err, data) {
+                if (!err) {
+                    return alert("Album already exists.");
+                }
+                if (err.code !== "NotFound") {
+                    return alert("There was an error creating your album: " + err.message);
+                }
+                s3.putObject({ Key: albumKey }, function (err, data) {
+                    if (err) {
+                        return alert("There was an error creating your album: " + err.message);
+                    }
+                    alert("Successfully created album.");
+                    viewAlbum(albumName);
+                });
+            });
+        }
+
+        function viewAlbum(albumName) {
+            var albumPhotosKey = encodeURIComponent(albumName) + "/";
+            s3.listObjects({ Prefix: albumPhotosKey }, function (err, data) {
+                if (err) {
+                    return alert("There was an error viewing your album: " + err.message);
+                }
+                // 'this' references the AWS.Response instance that represents the response
+                var href = this.request.httpRequest.endpoint.href;
+                var bucketUrl = href + albumBucketName + "/";
+
+                var photos = data.Contents.map(function (photo) {
+                    var photoKey = photo.Key;
+                    var photoUrl = bucketUrl + encodeURIComponent(photoKey);
+                    return getHtml([
+                        "<span>",
+                        "<div>",
+                        '<img style="width:128px;height:128px;" src="' + photoUrl + '"/>',
+                        "</div>",
+                        "<div>",
+                        "<span onclick=\"deletePhoto('" +
+                        albumName +
+                        "','" +
+                        photoKey +
+                        "')\">",
+                        "<a class=\"btn btn-light\">X</a>",
+                        "</span>",
+                        "<span>",
+                        photoKey.replace(albumPhotosKey, ""),
+                        "</span>",
+                        "</div>",
+                        "</span>"
+                    ]);
+                });
+                var message = photos.length
+                    ? "<p>Click on the X to delete the photo</p>"
+                    : "<p>You do not have any photos in this album. Please add photos.</p>";
+                var htmlTemplate = [
+                    "<h2>",
+                    "Album: " + albumName,
+                    "</h2>",
+                    message,
+                    "<div>",
+                    getHtml(photos),
+                    "</div>",
+                    '<input id="photoupload" type="file" accept="image/*">',
+                    '<a class=\"btn btn-light\" id="addphoto" onclick="addPhoto(\'' + albumName + "')\">",
+                    "Add Photo",
+                    "</a>",
+                    '<a class=\"btn btn-light\" onclick="listAlbums()">',
+                    "Back To Albums",
+                    "</a>"
+                ];
+                document.getElementById("app").innerHTML = getHtml(htmlTemplate);
+            });
+        }
+
+        function addPhoto(albumName) {
+            var files = document.getElementById("photoupload").files;
+            if (!files.length) {
+                return alert("Please choose a file to upload first.");
+            }
+            var file = files[0];
+            var fileName = file.name;
+            var albumPhotosKey = encodeURIComponent(albumName) + "/";
+
+            var photoKey = albumPhotosKey + fileName;
+
+            // Use S3 ManagedUpload class as it supports multipart uploads
+            var upload = new AWS.S3.ManagedUpload({
+                params: {
+                    Bucket: albumBucketName,
+                    Key: photoKey,
+                    Body: file,
+                    ACL: "public-read"
+                }
+            });
+
+            var promise = upload.promise();
+
+            promise.then(
+                function (data) {
+                    alert("Successfully uploaded photo.");
+                    viewAlbum(albumName);
+                },
+                function (err) {
+                    return alert("There was an error uploading your photo: ", err.message);
+                }
+            );
+        }
+
+        function deletePhoto(albumName, photoKey) {
+            s3.deleteObject({ Key: photoKey }, function (err, data) {
+                if (err) {
+                    return alert("There was an error deleting your photo: ", err.message);
+                }
+                alert("Successfully deleted photo.");
+                viewAlbum(albumName);
+            });
+        }
+
+        function deleteAlbum(albumName) {
+            var albumKey = encodeURIComponent(albumName) + "/";
+            s3.listObjects({ Prefix: albumKey }, function (err, data) {
+                if (err) {
+                    return alert("There was an error deleting your album: ", err.message);
+                }
+                var objects = data.Contents.map(function (object) {
+                    return { Key: object.Key };
+                });
+                s3.deleteObjects(
+                    {
+                        Delete: { Objects: objects, Quiet: true }
+                    },
+                    function (err, data) {
+                        if (err) {
+                            return alert("There was an error deleting your album: ", err.message);
+                        }
+                        alert("Successfully deleted album.");
+                        listAlbums();
+                    }
+                );
+            });
+        }
+        
+
+        function getHtml(template) {
+            return template.join('\n');
+        }
+        listAlbums();
+         
+    </script>
+    <script>
+        //AWS.config.update({region: 'us-east-1'})
+        var rekognition = new AWS.Rekognition();
+        var params = {
+            SimilarityThreshold: 90,
+            SourceImage: {
+                S3Object: {
+                    Bucket: "api-bridge-rekognition",
+                    Name: "FirstPhoto/Dorian1.jpg"
+                }
+            },
+            TargetImage: {
+                S3Object: {
+                    Bucket: "api-bridge-rekognition",
+                    Name: "SecondPhoto/Dorian2.jpg"
+                    //Name: "Login/Gini.jpg"
+                }
+            }
+        };
+        function AWScompare(){
+            rekognition.compareFaces(params, function (err, data) {
+        
+                if (err) console.log(err, err.stack); // an error occurred
+                else {
+                    console.log(data);
+                    data.FaceMatches.filter(function(match))
+                };
+                //console.log(data["FaceMatches"]);
+                //console.log(data["FaceMatches"][0]["Similarity"] > '90');
+                //console.log(data["UnmatchedFaces"][0]["Confidence"]);
+                if(data["FaceMatches"][0] == null){
+                    if(data["UnmatchedFaces"][0]["Confidence"] > '90')console.log("Face unmatched!");
+                    else if(data["UnmatchedFaces"][0]["Confidence"] < '90')console.log("Face matched!");
+                }
+                else if(data["UnmatchedFaces"][0] == null){
+                    if(data["FaceMatches"][0]["Similarity"] > '90')console.log("Face matched!");
+                    else if(data["FaceMatches"][0]["Similarity"] < '90')console.log("Face unmatched!");
+                }
+            });
+        }
+        </script>  
+</head>
+
+<body>
+    <h1>Upload Image For Face Recognition</h1>
+    <div id="app"></div>
+    <br>
+    <div>
+        <a class="btn btn-light btn-lg" role="button" onclick="AWScompare()">Recognize Face</a>
+    </div>
+    <div>
+        <a class="btn btn-light btn-lg" href="/receivebox" role="button">Back to Recievebox</a>
+    </div>
+
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"
+        integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl"
+        crossorigin="anonymous"></script>
+     
+    
+<%- include('partials/footer') %>
+
+</body>
+
+</html>
